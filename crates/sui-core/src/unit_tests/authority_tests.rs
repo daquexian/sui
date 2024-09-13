@@ -4583,7 +4583,6 @@ async fn test_shared_object_transaction_ok() {
     let shared_object_version = authority
         .epoch_store_for_testing()
         .get_shared_locks(&certificate.key())
-        .expect("Reading shared locks should not fail")
         .expect("Locks should be set")
         .into_iter()
         .find_map(|((object_id, initial_shared_version), version)| {
@@ -4701,7 +4700,6 @@ async fn test_consensus_commit_prologue_generation() {
         authority_state
             .epoch_store_for_testing()
             .get_shared_locks(txn_key)
-            .unwrap()
             .expect("locks should be set")
             .iter()
             .filter_map(|((id, initial_shared_version), seq)| {
@@ -5827,9 +5825,7 @@ async fn test_consensus_handler_per_object_congestion_control(
     } else {
         epoch_store.get_highest_pending_checkpoint_height()
     };
-    let deferred_txns = epoch_store
-        .get_all_deferred_transactions_for_test()
-        .unwrap();
+    let deferred_txns = epoch_store.get_all_deferred_transactions_for_test();
     assert_eq!(deferred_txns.len(), 1);
     assert_eq!(deferred_txns[0].1.len(), 3);
     let deferral_key = deferred_txns[0].0;
@@ -5890,8 +5886,7 @@ async fn test_consensus_handler_per_object_congestion_control(
 
     let deferred_txns = authority
         .epoch_store_for_testing()
-        .get_all_deferred_transactions_for_test()
-        .unwrap();
+        .get_all_deferred_transactions_for_test();
     assert_eq!(deferred_txns.len(), 1);
     assert_eq!(deferred_txns[0].1.len(), 1);
     let deferral_key = deferred_txns[0].0;
@@ -5919,7 +5914,6 @@ async fn test_consensus_handler_per_object_congestion_control(
     assert!(authority
         .epoch_store_for_testing()
         .get_all_deferred_transactions_for_test()
-        .unwrap()
         .is_empty());
 }
 
@@ -6065,14 +6059,12 @@ async fn test_consensus_handler_congestion_control_transaction_cancellation() {
     assert!(authority
         .epoch_store_for_testing()
         .get_all_deferred_transactions_for_test()
-        .unwrap()
         .is_empty());
 
     // Check cancelled transaction shared locks.
     let shared_object_version = authority
         .epoch_store_for_testing()
         .get_shared_locks(&cancelled_txn.key())
-        .expect("Reading shared locks should not fail")
         .expect("locks should be set")
         .into_iter()
         .collect::<HashMap<_, _>>();

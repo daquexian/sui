@@ -68,7 +68,6 @@ impl InMemoryObjectStore {
                         .get_or_init(|| {
                             shared_locks_source
                                 .get_shared_locks(tx_key)
-                                .expect("get_shared_locks should not fail")
                                 .map(|l| l.into_iter().collect())
                         })
                         .as_ref()
@@ -184,7 +183,7 @@ impl GetSharedLocks for InMemoryObjectStore {
     fn get_shared_locks(
         &self,
         _key: &TransactionKey,
-    ) -> SuiResult<Option<Vec<(ConsensusObjectSequenceKey, SequenceNumber)>>> {
+    ) -> Option<Vec<(ConsensusObjectSequenceKey, SequenceNumber)>> {
         unreachable!()
     }
 

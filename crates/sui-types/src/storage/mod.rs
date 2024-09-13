@@ -598,7 +598,7 @@ pub trait GetSharedLocks: Send + Sync {
     fn get_shared_locks(
         &self,
         key: &TransactionKey,
-    ) -> SuiResult<Option<Vec<(ConsensusObjectSequenceKey, SequenceNumber)>>>;
+    ) -> Option<Vec<(ConsensusObjectSequenceKey, SequenceNumber)>>;
 
     fn is_initial_shared_version_unknown(&self) -> bool;
 }

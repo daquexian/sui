@@ -286,7 +286,7 @@ impl SharedObjectCongestionTracker {
     }
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub enum CongestionPerObjectDebt {
     V1(Round, u64),
 }
