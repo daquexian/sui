@@ -2440,6 +2440,7 @@ impl AuthorityPerEpochStore {
         }
     }
 
+    #[cfg(test)]
     pub fn test_insert_user_signature(
         &self,
         digest: TransactionDigest,
@@ -2458,6 +2459,13 @@ impl AuthorityPerEpochStore {
             .write()
             .push_consensus_output(output);
         self.consensus_notify_read.notify(&key, &());
+    }
+
+    #[cfg(test)]
+    pub(crate) fn push_consensus_output_for_tests(&self, output: ConsensusCommitOutput) {
+        self.consensus_quarantine
+            .write()
+            .push_consensus_output(output);
     }
 
     fn finish_consensus_certificate_process_with_batch(
@@ -4842,7 +4850,6 @@ impl ConsensusCommitOutput {
     }
 
     // in testing code we often need to write to the db outside of a consensus commit
-    #[cfg(test)]
     pub(crate) fn set_default_commit_stats_for_testing(&mut self) {
         self.record_consensus_commit_stats(Default::default());
     }
