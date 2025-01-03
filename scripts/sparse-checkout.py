@@ -49,6 +49,18 @@ def update_git_sparse_checkout(crates_to_checkout):
     # 3) run git checkout to refresh the sparse checkout
     subprocess.check_call(["git", "checkout"])
 
+def load_cargo_toml(cargo_toml_path="Cargo.toml"):
+    """
+    Load the Cargo.toml file (from git, not the filesystem) and return the parsed TOML data.
+    """
+
+    try:
+        cargo_toml_content = subprocess.check_output(["git", "show", f"HEAD:{cargo_toml_path}"]).decode()
+        cargo_data = toml.loads(cargo_toml_content)
+    except subprocess.CalledProcessError:
+        print(f"Could not retrieve {cargo_toml_path} from git. Exiting.")
+        sys.exit(1)
+
 def modify_cargo_toml(crates_to_checkout, cargo_toml_path="Cargo.toml"):
     """
     Remove crates not in crates_to_checkout from Cargo.toml [workspace.members].
@@ -62,13 +74,7 @@ def modify_cargo_toml(crates_to_checkout, cargo_toml_path="Cargo.toml"):
         print(f"Could not find {cargo_toml_path}. Exiting.")
         sys.exit(1)
 
-    # Use git to get the contents of Cargo.toml at the current commit
-    try:
-        cargo_toml_content = subprocess.check_output(["git", "show", f"HEAD:{cargo_toml_path}"]).decode()
-        cargo_data = toml.loads(cargo_toml_content)
-    except subprocess.CalledProcessError:
-        print(f"Could not retrieve {cargo_toml_path} from git. Exiting.")
-        sys.exit(1)
+    cargo_data = load_cargo_toml(cargo_toml_path)
 
     # Make sure we have workspace.members in the top-level Cargo.toml
     workspace = cargo_data.setdefault("workspace", {})
@@ -217,10 +223,46 @@ def reset_index():
 
     subprocess.check_call(["git", "checkout", "Cargo.toml", "Cargo.lock"])
 
+def auto_update_config():
+
+    # get the list of files that have changed between the current commit and the merge base.
+    # Use this to select the directories from the workspace that should be included in the sparse checkout.
+
+    # Get the merge base of the current commit and origin/main
+    commit_sha = subprocess.check_output(["git", "merge-base", "HEAD", "origin/main"]).decode().strip()
+
+    # Get the list of files that have changed between the current commit and the merge base
+    changed_files = subprocess.check_output(["git", "diff", "--name-only", commit_sha]).decode().split("\n")
+
+    cargo_data = load_cargo_toml("Cargo.toml")
+
+    # for every directory in workspace.members and exclude, check if it is a prefix of some changed file.
+    # If it is, add it to the list of directories to checkout.
+    directories_to_checkout = []
+
+    for directory in cargo_data["workspace"]["members"] + cargo_data["workspace"].get("exclude", []):
+        for file in changed_files:
+            if file.startswith(directory):
+                directories_to_checkout.append(directory)
+                break
+
+    # unique-ify the list
+    directories_to_checkout = list(set(directories_to_checkout))
+
+    # write the list of directories to .sparse
+    with open(".sparse", "w") as f:
+        f.write("# Directories to include in the sparse checkout\n")
+        for directory in directories_to_checkout:
+            f.write(f"{directory}\n")
+
 def main():
     # if given the `reset` command, reset changes to Cargo.lock and Cargo.toml
     if len(sys.argv) > 1 and sys.argv[1] == "reset":
         reset_index()
+        sys.exit(0)
+
+    if len(sys.argv) > 1 and sys.argv[1] == "auto":
+        auto_update_config()
         sys.exit(0)
 
     # 1. Read the crates to include from .sparse
