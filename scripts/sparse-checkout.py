@@ -46,6 +46,8 @@ def update_git_sparse_checkout(crates_to_checkout):
     cmd = ["git", "sparse-checkout", "set"] + crates_to_checkout + default_directories
     subprocess.check_call(cmd)
 
+    # 3) run git checkout to refresh the sparse checkout
+    subprocess.check_call(["git", "checkout"])
 
 def modify_cargo_toml(crates_to_checkout, cargo_toml_path="Cargo.toml"):
     """
@@ -134,14 +136,17 @@ def modify_cargo_toml(crates_to_checkout, cargo_toml_path="Cargo.toml"):
 
     print("Successfully updated Cargo.toml")
 
+def get_ignored_files():
+    ignored_files = subprocess.check_output(["git", "ls-files", "-v"]).decode().split("\n")
+    ignored_files = [line.split(" ")[1] for line in ignored_files if line.startswith("h")]
+    return ignored_files
+
 def ignore_cargo_changes():
     """
     Ignore changes to Cargo.toml and Cargo.lock with the --assume-unchanged flag.
     """
 
-    # first get a list of all currently ignored files
-    ignored_files = subprocess.check_output(["git", "ls-files", "-v"]).decode().split("\n")
-    ignored_files = [line.split(" ")[1] for line in ignored_files if line.startswith("h")]
+    ignored_files = get_ignored_files()
 
     # ignored files should include only Cargo.toml and Cargo.lock
     if "Cargo.toml" not in ignored_files:
@@ -161,48 +166,66 @@ def ignore_cargo_changes():
         print(f"Un-ignoring {file}")
         subprocess.check_call(["git", "update-index", "--no-assume-unchanged", file])
 
+def create_sparse_checkout_worktree():
+    # if .sparse is not found, offer to create a new sparse worktree
+    print("No crates found in .sparse (or file not present).")
+    print("Would you like to create a new sparse worktree? (Y/n)")
+    choice = input().lower()
+    if choice == "y" or choice == "":
+        # move to git repo root
+        os.chdir(subprocess.check_output(["git", "rev-parse", "--show-toplevel"]).decode().strip())
+        # get basename of current directory
+        dir = os.path.basename(os.getcwd())
+        sparse_dir = f"../{dir}-sparse"
+
+        # ask if they would like to use this name or a different one
+        print(f"Would you like to use the directory name '{sparse_dir}' for the sparse worktree? (Y/n)")
+        choice = input().lower()
+        if choice == "n":
+            print("Enter the name for the sparse worktree:")
+            sparse_dir = input()
+            # add ../ if not already present
+            if not sparse_dir.startswith("../"):
+                sparse_dir = f"../{sparse_dir}"
+
+        print(f"Creating a new sparse worktree at {sparse_dir}")
+        subprocess.check_call(["git", "worktree", "add", "--no-checkout", sparse_dir, "main"])
+
+        # move to the sparse worktree
+        os.chdir(sparse_dir)
+
+        # now launch $EDITOR to configure the .sparse file. The default contents of .sparse
+        # are `crates/sui-core`. First, write the defaults
+        with open(".sparse", "w") as f:
+            f.write("# Directories to include in the sparse checkout\n")
+            f.write("crates/sui-core\n")
+        # now launch $EDITOR
+        subprocess.check_call([os.getenv("EDITOR", "vi"), ".sparse"])
+    else:
+        print("Exiting.")
+        sys.exit(0)
+    crates_to_checkout = read_sparse_config(".sparse")
+    return crates_to_checkout
+
+def reset_index():
+    ignored_files = get_ignored_files()
+
+    # check that Cargo.toml and Cargo.lock are ignored
+    if "Cargo.toml" not in ignored_files or "Cargo.lock" not in ignored_files:
+        print("Cargo.toml and/or Cargo.lock are not ignored. Reset them manually or check in your changes")
+        sys.exit(1)
+
+    subprocess.check_call(["git", "checkout" "Cargo.toml", "Cargo.lock"])
+
 def main():
+    # if given the `reset` command, reset changes to Cargo.lock and Cargo.toml
+    if len(sys.argv) > 1 and sys.argv[1] == "reset":
+        sys.exit(0)
+
     # 1. Read the crates to include from .sparse
     crates_to_checkout = read_sparse_config(".sparse")
     if crates_to_checkout is None:
-        # if .sparse is not found, offer to create a new sparse worktree
-        print("No crates found in .sparse (or file not present).")
-        print("Would you like to create a new sparse worktree? (Y/n)")
-        choice = input().lower()
-        if choice == "y" or choice == "":
-            # move to git repo root
-            os.chdir(subprocess.check_output(["git", "rev-parse", "--show-toplevel"]).decode().strip())
-            # get basename of current directory
-            dir = os.path.basename(os.getcwd())
-            sparse_dir = f"../{dir}-sparse"
-
-            # ask if they would like to use this name or a different one
-            print(f"Would you like to use the directory name '{sparse_dir}' for the sparse worktree? (Y/n)")
-            choice = input().lower()
-            if choice == "n":
-                print("Enter the name for the sparse worktree:")
-                sparse_dir = input()
-                # add ../ if not already present
-                if not sparse_dir.startswith("../"):
-                    sparse_dir = f"../{sparse_dir}"
-
-            print(f"Creating a new sparse worktree at {sparse_dir}")
-            subprocess.check_call(["git", "worktree", "add", "--no-checkout", sparse_dir, "main"])
-
-            # move to the sparse worktree
-            os.chdir(sparse_dir)
-
-            # now launch $EDITOR to configure the .sparse file. The default contents of .sparse
-            # are `crates/sui-core`. First, write the defaults
-            with open(".sparse", "w") as f:
-                f.write("# Directories to include in the sparse checkout\n")
-                f.write("crates/sui-core\n")
-            # now launch $EDITOR
-            subprocess.check_call([os.getenv("EDITOR", "vi"), ".sparse"])
-        else:
-            print("Exiting.")
-            sys.exit(0)
-        crates_to_checkout = read_sparse_config(".sparse")
+        crates_to_checkout = create_sparse_checkout_worktree()
         assert crates_to_checkout is not None
 
     # 2. Update git sparse checkout
