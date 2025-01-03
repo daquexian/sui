@@ -215,11 +215,12 @@ def reset_index():
         print("Cargo.toml and/or Cargo.lock are not ignored. Reset them manually or check in your changes")
         sys.exit(1)
 
-    subprocess.check_call(["git", "checkout" "Cargo.toml", "Cargo.lock"])
+    subprocess.check_call(["git", "checkout", "Cargo.toml", "Cargo.lock"])
 
 def main():
     # if given the `reset` command, reset changes to Cargo.lock and Cargo.toml
     if len(sys.argv) > 1 and sys.argv[1] == "reset":
+        reset_index()
         sys.exit(0)
 
     # 1. Read the crates to include from .sparse
