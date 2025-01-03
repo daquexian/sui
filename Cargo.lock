@@ -8432,6 +8432,7 @@ dependencies = [
  "anyhow",
  "fastcrypto",
  "futures",
+ "itertools 0.13.0",
  "mysten-metrics",
  "parking_lot 0.12.1",
  "prometheus",
