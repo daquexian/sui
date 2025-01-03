@@ -57,6 +57,7 @@ def load_cargo_toml(cargo_toml_path="Cargo.toml"):
     try:
         cargo_toml_content = subprocess.check_output(["git", "show", f"HEAD:{cargo_toml_path}"]).decode()
         cargo_data = toml.loads(cargo_toml_content)
+        return cargo_data
     except subprocess.CalledProcessError:
         print(f"Could not retrieve {cargo_toml_path} from git. Exiting.")
         sys.exit(1)
