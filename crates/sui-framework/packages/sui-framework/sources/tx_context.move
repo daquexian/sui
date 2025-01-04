@@ -139,6 +139,7 @@ public fun new(
     assert!(tx_hash.length() == TX_HASH_LENGTH, EBadTxHashLength);
     if (NATIVE_CONTEXT) {
         native_replace(sender, tx_hash, epoch, epoch_timestamp_ms, ids_created);
+        // return an empty TxContext given all the info is held on the native side (call above)
         TxContext {
             sender: @0x0,
             tx_hash: vector::empty(),

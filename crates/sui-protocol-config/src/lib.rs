@@ -18,7 +18,7 @@ use tracing::{info, warn};
 
 /// The minimum and maximum protocol versions supported by this build.
 const MIN_PROTOCOL_VERSION: u64 = 1;
-const MAX_PROTOCOL_VERSION: u64 = 71;
+const MAX_PROTOCOL_VERSION: u64 = 72;
 
 // Record history of protocol version allocations here:
 //
@@ -204,6 +204,7 @@ const MAX_PROTOCOL_VERSION: u64 = 71;
 //             Add std::uq64_64 module to Move stdlib.
 //             Improve gas/wall time efficiency of some Move stdlib vector functions
 // Version 71: [SIP-45] Enable consensus amplification.
+// Version 72: Native TxContext in Move.
 
 #[derive(Copy, Clone, Debug, Hash, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProtocolVersion(u64);
@@ -3097,6 +3098,7 @@ impl ProtocolConfig {
                     // Enable bursts for congestion control. (10x the per-commit budget)
                     cfg.allowed_txn_cost_overage_burst_per_object_in_commit = Some(185_000_000);
                 }
+                72 => {}
                 // Use this template when making changes:
                 //
                 //     // modify an existing constant.
