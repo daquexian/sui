@@ -834,7 +834,7 @@ mod object_cost_tests {
                 // burst limit is 100 + 200 = 300
                 // tx cost is 100 (gas budget)
                 SharedObjectCongestionTracker::new(
-                    [(shared_obj_0, 301), (shared_obj_1, 199)],
+                    [(shared_obj_0, Debt(301)), (shared_obj_1, Debt(199))],
                     mode,
                     Some(max_accumulated_txn_cost_per_object_in_commit),
                     None,
@@ -852,7 +852,7 @@ mod object_cost_tests {
                 // burst limit is 2 + 2 = 4
                 // tx cost is 1 (tx count)
                 SharedObjectCongestionTracker::new(
-                    [(shared_obj_0, 5), (shared_obj_1, 4)],
+                    [(shared_obj_0, Debt(5)), (shared_obj_1, Debt(4))],
                     mode,
                     Some(max_accumulated_txn_cost_per_object_in_commit),
                     None,
@@ -870,7 +870,7 @@ mod object_cost_tests {
                 // burst limit is 100 + 200 = 300
                 // tx cost is 90 (gas budget capped at 45*(1 move call + 1 input))
                 SharedObjectCongestionTracker::new(
-                    [(shared_obj_0, 301), (shared_obj_1, 250)],
+                    [(shared_obj_0, Debt(301)), (shared_obj_1, Debt(250))],
                     mode,
                     Some(max_accumulated_txn_cost_per_object_in_commit),
                     Some(45), // Make the cap just less than the gas budget, there are 1 objects in tx.
