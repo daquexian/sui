@@ -310,7 +310,8 @@ pub struct AuthorityPerEpochStore {
 
     consensus_quarantine: RwLock<ConsensusOutputQuarantine>,
 
-    shared_version_assignments: DashMap<TransactionKey, Vec<(ObjectID, SequenceNumber)>>,
+    shared_version_assignments:
+        DashMap<TransactionKey, Vec<(ConsensusObjectSequenceKey, SequenceNumber)>>,
     deferred_transactions: Mutex<BTreeMap<DeferralKey, Vec<VerifiedSequencedConsensusTransaction>>>,
     user_signatures_for_checkpoints: RwLock<HashMap<TransactionDigest, Vec<GenericSignature>>>,
 
@@ -1653,19 +1654,15 @@ impl AuthorityPerEpochStore {
             let tables = self.tables()?;
             let mut db_transaction = tables.next_shared_object_versions.transaction()?;
 
-            let next_versions = if self.epoch_start_config().use_version_assignment_tables_v3() {
-                db_transaction.multi_get(&tables.next_shared_object_versions_v2, objects_to_init)?
-            } else {
-                db_transaction.multi_get(
-                    &tables.next_shared_object_versions,
-                    objects_to_init.iter().map(|(id, _)| *id),
-                )?
-            };
-
             let next_versions = self
                 .consensus_quarantine
                 .read()
-                .get_next_shared_object_versions(&tables, &ids)?;
+                .get_next_shared_object_versions(
+                    self.epoch_start_config(),
+                    &tables,
+                    &db_transaction,
+                    &objects_to_init,
+                )?;
 
             let uninitialized_objects: Vec<ConsensusObjectSequenceKey> = next_versions
                 .iter()
@@ -4284,6 +4281,7 @@ impl AuthorityPerEpochStore {
 
 mod quarantine {
     use mysten_common::fatal;
+    use typed_store::rocks::DBTransaction;
 
     use crate::authority::shared_object_congestion_tracker::Debt;
 
@@ -4305,7 +4303,7 @@ mod quarantine {
         builder_digest_to_checkpoint: HashMap<TransactionDigest, CheckpointSequenceNumber>,
 
         // Any un-committed next versions are stored here.
-        shared_object_next_versions: RefCountedHashMap<ObjectID, SequenceNumber>,
+        shared_object_next_versions: RefCountedHashMap<ConsensusObjectSequenceKey, SequenceNumber>,
 
         // The most recent congestion control debts for objects. Uses a ref-count to track
         // which objects still exist in some element of output_queue.
@@ -4518,26 +4516,34 @@ mod quarantine {
 
         pub(super) fn get_next_shared_object_versions(
             &self,
+            epoch_start_config: &EpochStartConfiguration,
             tables: &AuthorityEpochTables,
-            object_ids: &[ObjectID],
+            db_transaction: &DBTransaction<'_>,
+            objects_to_init: &[ConsensusObjectSequenceKey],
         ) -> SuiResult<Vec<Option<SequenceNumber>>> {
-            let mut results = Vec::with_capacity(object_ids.len());
-            let mut fallback_keys = Vec::with_capacity(object_ids.len());
-            let mut fallback_indices = Vec::with_capacity(object_ids.len());
+            let mut results = Vec::with_capacity(objects_to_init.len());
+            let mut fallback_keys = Vec::with_capacity(objects_to_init.len());
+            let mut fallback_indices = Vec::with_capacity(objects_to_init.len());
 
-            for (i, object_id) in object_ids.iter().enumerate() {
-                if let Some(next_version) = self.shared_object_next_versions.get(object_id) {
+            for (i, object_key) in objects_to_init.iter().enumerate() {
+                if let Some(next_version) = self.shared_object_next_versions.get(object_key) {
                     results.push(Some(*next_version));
                 } else {
                     results.push(None);
-                    fallback_keys.push(object_id);
+                    fallback_keys.push(object_key);
                     fallback_indices.push(i);
                 }
             }
 
-            let fallback_results = tables
-                .next_shared_object_versions
-                .multi_get(fallback_keys)?;
+            let fallback_results = if epoch_start_config.use_version_assignment_tables_v3() {
+                db_transaction.multi_get(&tables.next_shared_object_versions_v2, fallback_keys)?
+            } else {
+                db_transaction.multi_get(
+                    &tables.next_shared_object_versions,
+                    fallback_keys.iter().map(|(id, _)| *id),
+                )?
+            };
+
             assert_eq!(fallback_results.len(), fallback_indices.len());
             for (i, result) in fallback_indices.into_iter().zip(fallback_results) {
                 results[i] = result;
@@ -4973,7 +4979,17 @@ impl ConsensusCommitOutput {
         )?;
 
         if let Some(next_versions) = self.next_shared_object_versions {
-            batch.insert_batch(&tables.next_shared_object_versions, next_versions)?;
+            if epoch_store
+                .epoch_start_config()
+                .use_version_assignment_tables_v3()
+            {
+                batch.insert_batch(&tables.next_shared_object_versions_v2, next_versions)?;
+            } else {
+                batch.insert_batch(
+                    &tables.next_shared_object_versions,
+                    next_versions.into_iter().map(|((id, _), v)| (id, v)),
+                )?;
+            }
         }
 
         batch.delete_batch(&tables.deferred_transactions, self.deleted_deferred_txns)?;
@@ -5051,6 +5067,10 @@ impl GetSharedLocks for AuthorityPerEpochStore {
         self.shared_version_assignments
             .get(key)
             .map(|locks| locks.clone())
+    }
+
+    fn is_initial_shared_version_unknown(&self) -> bool {
+        !self.epoch_start_config().use_version_assignment_tables_v3()
     }
 }
 
