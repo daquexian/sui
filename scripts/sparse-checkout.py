@@ -46,6 +46,11 @@ def read_sparse_config(sparse_file=".sparse"):
         if not crates:
             print(f"No crates found in {sparse_file}. Exiting.")
             sys.exit(1)
+
+        # sui-benchmark tests use sui-surfer which requires move sources to be checked out
+        if "crates/sui-surfer" not in crates and "crates/sui-benchmark" in crates:
+            crates.append("crates/sui-surfer")
+
         return crates
     else:
         return None
@@ -57,7 +62,12 @@ def update_git_sparse_checkout(crates_to_checkout):
     """
 
     # You can add any default directories you always want checked out here
-    default_directories = ["scripts", ".cargo", ".changeset", ".config", ".github"]
+    default_directories = ["scripts", ".cargo", ".changeset", ".config", ".github", "examples"]
+
+    # if we don't have sui-framework, we probably need to add the move sources in order for tests
+    # to run
+    if "crates/sui-framework" not in crates_to_checkout:
+        default_directories.append("crates/sui-framework/packages")
 
     # 1) Initialize sparse checkout (if not already).
     subprocess.check_call(["git", "sparse-checkout", "init", "--cone"])
