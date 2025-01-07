@@ -2049,51 +2049,40 @@ impl AuthorityPerEpochStore {
         &self,
         keys: impl Iterator<Item = SequencedConsensusTransactionKey>,
     ) -> SuiResult<Vec<bool>> {
-        // If the results were frequently true, it couild be better to check the in-memory store
-        // before reading from the DB, but most of the time this function is called on keys that
-        // have not been processed, so both reads are necessary anyway.
-        let keys = keys.collect::<Vec<_>>();
-        let mut results = self
-            .tables()?
-            .consensus_message_processed
-            .multi_contains_keys(&keys)?;
+        let size_hint = keys.size_hint().0;
+        let mut results = Vec::with_capacity(size_hint);
+        let mut fallback_keys = Vec::with_capacity(size_hint);
+        let mut fallback_indices = Vec::with_capacity(size_hint);
 
-        for (key, result) in keys.iter().zip(&mut results) {
-            if !*result {
-                *result = self
-                    .consensus_quarantine
-                    .read()
-                    .is_consensus_message_processed(key);
+        {
+            let consensus_quarantine = self.consensus_quarantine.read();
+
+            for (i, key) in keys.enumerate() {
+                if consensus_quarantine.is_consensus_message_processed(&key) {
+                    results.push(true);
+                } else {
+                    results.push(false);
+                    fallback_keys.push(key);
+                    fallback_indices.push(i);
+                }
             }
         }
 
-        Ok(results)
-    }
+        let fallback_results = self
+            .tables()?
+            .consensus_message_processed
+            .multi_contains_keys(fallback_keys)?;
 
-    /// Like consensus_message_processed_notify, but only checks the in-memory data.
-    /// This is correct because in-memory data contains only transactions that have
-    /// arrived after the last certified checkpoint, and checkpoints cannot contain
-    /// already-checkpointed transactions.
-    pub(crate) async fn consensus_messages_processed_notify_for_checkpoint(
-        &self,
-        keys: Vec<SequencedConsensusTransactionKey>,
-    ) -> Result<(), SuiError> {
-        let registrations = self.consensus_notify_read.register_all(&keys);
+        assert_eq!(fallback_results.len(), fallback_indices.len());
 
-        let results = keys.iter().map(|key| {
-            self.consensus_quarantine
-                .read()
-                .is_consensus_message_processed(key)
-        });
-
-        let unprocessed_keys_registrations = registrations
+        for (result, i) in fallback_results
             .into_iter()
-            .zip(results)
-            .filter(|(_, processed)| !processed)
-            .map(|(registration, _)| registration);
+            .zip(fallback_indices.into_iter())
+        {
+            results[i] = result;
+        }
 
-        join_all(unprocessed_keys_registrations).await;
-        Ok(())
+        Ok(results)
     }
 
     pub async fn consensus_messages_processed_notify(

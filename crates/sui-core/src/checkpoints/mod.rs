@@ -857,6 +857,17 @@ impl CheckpointBuilder {
             .epoch_store
             .last_built_checkpoint_builder_summary()
             .expect("epoch should not have ended");
+
+        if let Some(summary) = &summary {
+            if summary.summary.sequence_number >= limit {
+                info!(
+                    "CheckpointBuilder already built up to limit {}",
+                    summary.summary.sequence_number
+                );
+                return;
+            }
+        }
+
         let mut last_height = summary.clone().and_then(|s| s.checkpoint_height);
         let mut last_timestamp = summary.map(|s| s.summary.timestamp_ms);
 
@@ -1310,7 +1321,7 @@ impl CheckpointBuilder {
 
             info!("hay");
             self.epoch_store
-                .consensus_messages_processed_notify_for_checkpoint(transaction_keys)
+                .consensus_messages_processed_notify(transaction_keys)
                 .await?;
             info!("hay");
         }
