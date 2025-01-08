@@ -84,29 +84,29 @@ impl From<NitroAttestationVerifyError> for SuiError {
     }
 }
 
-/// Given an attestation document bytes, deserialize and verify its validity according to
-/// <https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html>
-/// and check the user_data is consistent with the enclave public key.
-pub fn attestation_verify_inner(
+/// Given an attestation in bytes, parse it into signature, signed message and a parsed payload.
+pub fn parse_nitro_attestation_inner(
     attestation_bytes: &[u8],
-    enclave_vk: &[u8],
-    expected_pcrs: &[&[u8]],
+) -> SuiResult<(Vec<u8>, Vec<u8>, AttestationDocument)> {
+    let cose_sign1 = CoseSign1::parse_and_validate(attestation_bytes)?;
+    let doc = AttestationDocument::parse_and_validate_payload(&cose_sign1.payload)?;
+    let signature = cose_sign1.clone().signature;
+    Ok((signature, cose_sign1.to_signed_message(), doc))
+}
+
+/// Given the signature bytes, signed message and parsed payload, verify everything according to
+/// <https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html> and
+/// <https://github.com/aws/aws-nitro-enclaves-nsm-api/blob/main/docs/attestation_process.md>.
+pub fn verify_nitro_attestation_inner(
+    signature: Vec<u8>,
+    signed_message: Vec<u8>,
+    payload: AttestationDocument,
     timestamp: u64,
 ) -> SuiResult<()> {
-    // Parse attestation into a valid cose sign1 object with valid header.
-    let cose_sign1 = CoseSign1::parse_and_validate(attestation_bytes)?;
-
-    // Parse attestation document payload and verify cert against AWS root of trust.
-    let doc = AttestationDocument::parse_and_validate_payload(
-        &cose_sign1.payload,
-        timestamp,
-        expected_pcrs,
-    )?;
-
     // Extract public key from cert and signature as P384.
-    let signature = Signature::from_slice(&cose_sign1.signature)
+    let signature = Signature::from_slice(&signature)
         .map_err(|_| NitroAttestationVerifyError::InvalidSignature)?;
-    let cert = X509Certificate::from_der(doc.certificate.as_slice())
+    let cert = X509Certificate::from_der(payload.certificate.as_slice())
         .map_err(|e| NitroAttestationVerifyError::InvalidCertificate(e.to_string()))?;
     let pk_bytes = SubjectPublicKeyInfo::parsed(cert.1.public_key())
         .map_err(|err| NitroAttestationVerifyError::InvalidCertificate(err.to_string()))?;
@@ -117,7 +117,7 @@ pub fn attestation_verify_inner(
             let verifying_key = VerifyingKey::from_sec1_bytes(ec.data())
                 .map_err(|_| NitroAttestationVerifyError::InvalidPublicKey)?;
             verifying_key
-                .verify(&cose_sign1.to_signed_message(), &signature)
+                .verify(&signed_message, &signature)
                 .map_err(|_| NitroAttestationVerifyError::SignatureFailedToVerify)?;
         }
         _ => {
@@ -125,15 +125,7 @@ pub fn attestation_verify_inner(
         }
     }
 
-    // Verify the user data equals to the enclave public key.
-    let user_data = doc
-        .clone()
-        .user_data
-        .ok_or(NitroAttestationVerifyError::InvalidUserData)?;
-    if user_data != enclave_vk {
-        return Err(NitroAttestationVerifyError::InvalidUserData.into());
-    }
-
+    payload.validate_cert(timestamp)?;
     Ok(())
 }
 
@@ -383,7 +375,7 @@ impl CoseSign1 {
 /// The AWS Nitro Attestation Document, see https://docs.aws.amazon.com/enclaves/latest/user/verify-root.html#doc-def
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
-struct AttestationDocument {
+pub struct AttestationDocument {
     module_id: String,
     timestamp: u64,
     digest: String,
@@ -400,8 +392,6 @@ impl AttestationDocument {
     /// Adapted from https://github.com/EternisAI/remote-attestation-verifier/blob/main/src/lib.rs
     pub fn parse_and_validate_payload(
         payload: &Vec<u8>,
-        curr_timestamp: u64,
-        expected_pcrs: &[&[u8]],
     ) -> Result<AttestationDocument, NitroAttestationVerifyError> {
         let document_data: ciborium::value::Value = ciborium::de::from_reader(payload.as_slice())
             .map_err(|err| {
@@ -544,9 +534,6 @@ impl AttestationDocument {
             user_data,
             nonce,
         };
-
-        doc.validate_cert(curr_timestamp)?;
-        doc.validate_pcrs(expected_pcrs)?;
         Ok(doc)
     }
 
@@ -557,19 +544,6 @@ impl AttestationDocument {
         chain.push(self.certificate.as_slice());
         chain.extend(self.cabundle.iter().rev().map(|cert| cert.as_slice()));
         validate_cert_chain(&chain, now)
-    }
-
-    /// Validate the PCRs against the expected PCRs.
-    fn validate_pcrs(&self, expected_pcrs: &[&[u8]]) -> Result<(), NitroAttestationVerifyError> {
-        if expected_pcrs.is_empty() || expected_pcrs.len() > 32 {
-            return Err(NitroAttestationVerifyError::InvalidPcrs);
-        }
-        for (i, expected_pcr) in expected_pcrs.iter().enumerate() {
-            if self.pcrs[i] != *expected_pcr {
-                return Err(NitroAttestationVerifyError::InvalidPcrs);
-            }
-        }
-        Ok(())
     }
 }
 
