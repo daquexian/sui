@@ -168,6 +168,7 @@ async fn query_object_ids_with_filters(
         ",
     );
 
+    println!("{}", query);
     let sql_query = sql_query(query);
     let mut conn = db.connect().await?;
     Ok(sql_query.load::<IdCheckpoint>(&mut conn).await?)
@@ -206,6 +207,7 @@ async fn query_latest_object_versions(
         ",
         conditions
     );
+    println!("{}", query);
     let sql_query = sql_query(query);
     let mut conn = db.connect().await?;
     Ok(sql_query.load::<StoredObjVersion>(&mut conn).await?)
@@ -213,8 +215,32 @@ async fn query_latest_object_versions(
 
 #[cfg(test)]
 mod tests {
+    use move_core_types::ident_str;
+    use sui_indexer_alt_framework::Indexer;
+    use sui_indexer_alt_schema::MIGRATIONS;
+
     use super::*;
 
     #[tokio::test]
-    async fn test_query_objects_with_filters() {}
+    async fn test_query_objects_with_filters() {
+        let (indexer, _db) = Indexer::new_for_testing(&MIGRATIONS).await;
+        let mut conn = indexer.db().connect().await.unwrap();
+        query_objects_with_filters(
+            &indexer.db(),
+            1000,
+            ObjectFilter {
+                type_filter: Some(TypeFilter::ByType(StructTag {
+                    address: SuiAddress::ZERO.into(),
+                    module: ident_str!("coin").to_owned(),
+                    name: ident_str!("Coin").to_owned(),
+                    type_params: vec![],
+                })),
+                owner_filter: Some(SuiAddress::ZERO),
+            },
+            None,
+            100,
+        )
+        .await
+        .unwrap();
+    }
 }
